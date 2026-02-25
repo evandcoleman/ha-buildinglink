@@ -1,0 +1,39 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "BuildingLink",
+        "description": "Enter your BuildingLink refresh token. You can obtain this by intercepting the BuildingLink iOS app traffic.",
+        "data": {
+          "refresh_token": "Refresh Token"
+        }
+      }
+    },
+    "error": {
+      "invalid_auth": "Invalid refresh token",
+      "cannot_connect": "Cannot connect to BuildingLink"
+    },
+    "abort": {
+      "already_configured": "Already configured"
+    }
+  },
+  "entity": {
+    "sensor": {
+      "packages": {
+        "name": "Packages"
+      },
+      "maintenance_requests": {
+        "name": "Maintenance Requests"
+      },
+      "announcements": {
+        "name": "Announcements"
+      },
+      "calendar_events": {
+        "name": "Calendar Events"
+      },
+      "amenity_reservations": {
+        "name": "Amenity Reservations"
+      }
+    }
+  }
+}
