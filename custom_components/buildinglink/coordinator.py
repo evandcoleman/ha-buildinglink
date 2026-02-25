@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import timedelta
 import logging
 
-from pybuildinglink import (
+from .pybuildinglink import (
     AmenityReservation,
     Announcement,
     BuildingLinkClient,
@@ -14,7 +14,7 @@ from pybuildinglink import (
     MaintenanceRequest,
     Package,
 )
-from pybuildinglink.exceptions import BuildingLinkError
+from .pybuildinglink.exceptions import BuildingLinkError
 
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed

@@ -1,12 +1,14 @@
 {
   "domain": "buildinglink",
   "name": "BuildingLink",
-  "codeowners": ["@evandcoleman"],
+  "codeowners": [
+    "@evandcoleman"
+  ],
   "config_flow": true,
   "dependencies": [],
   "documentation": "https://github.com/evandcoleman/ha-buildinglink",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/evandcoleman/ha-buildinglink/issues",
-  "requirements": ["pybuildinglink @ git+https://github.com/evandcoleman/pybuildinglink.git@main"],
+  "requirements": [],
   "version": "0.2.0"
 }

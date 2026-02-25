@@ -8,8 +8,8 @@ from typing import Any
 import aiohttp
 import voluptuous as vol
 
-from pybuildinglink import BuildingLinkClient
-from pybuildinglink.exceptions import AuthenticationError
+from .pybuildinglink import BuildingLinkClient
+from .pybuildinglink.exceptions import AuthenticationError
 
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 
