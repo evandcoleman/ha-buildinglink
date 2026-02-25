@@ -5,7 +5,7 @@ from __future__ import annotations
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 
-from .const import CONF_DEVICE_ID, CONF_REFRESH_TOKEN, DOMAIN, PLATFORMS
+from .const import CONF_DEVICE_ID, CONF_PASSWORD, CONF_REFRESH_TOKEN, CONF_USERNAME, DOMAIN, PLATFORMS
 from .coordinator import BuildingLinkCoordinator
 
 
@@ -16,23 +16,20 @@ async def async_setup_entry(
     hass: HomeAssistant, entry: BuildingLinkConfigEntry
 ) -> bool:
     """Set up BuildingLink from a config entry."""
+    # Support both new (username/password) and legacy (refresh_token) configs
+    username = entry.data.get(CONF_USERNAME)
+    password = entry.data.get(CONF_PASSWORD)
+    refresh_token = entry.data.get(CONF_REFRESH_TOKEN)
+
     coordinator = BuildingLinkCoordinator(
         hass,
-        refresh_token=entry.data[CONF_REFRESH_TOKEN],
+        username=username,
+        password=password,
+        refresh_token=refresh_token,
         device_id=entry.data.get(CONF_DEVICE_ID),
     )
 
     await coordinator.async_config_entry_first_refresh()
-
-    # Store updated refresh token back to config entry
-    if coordinator.client.refresh_token != entry.data[CONF_REFRESH_TOKEN]:
-        hass.config_entries.async_update_entry(
-            entry,
-            data={
-                **entry.data,
-                CONF_REFRESH_TOKEN: coordinator.client.refresh_token,
-            },
-        )
 
     entry.runtime_data = coordinator
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)

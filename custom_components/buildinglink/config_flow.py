@@ -13,13 +13,13 @@ from pybuildinglink.exceptions import AuthenticationError
 
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
 
-from .const import CONF_DEVICE_ID, CONF_REFRESH_TOKEN, DOMAIN
+from .const import CONF_DEVICE_ID, CONF_PASSWORD, CONF_USERNAME, DOMAIN
 
 
 class BuildingLinkConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for BuildingLink."""
 
-    VERSION = 1
+    VERSION = 2
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
@@ -28,19 +28,20 @@ class BuildingLinkConfigFlow(ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            refresh_token = user_input[CONF_REFRESH_TOKEN]
+            username = user_input[CONF_USERNAME]
+            password = user_input[CONF_PASSWORD]
             device_id = str(uuid.uuid4())
 
             try:
                 async with aiohttp.ClientSession() as session:
                     client = BuildingLinkClient(
-                        refresh_token=refresh_token,
+                        username=username,
+                        password=password,
                         device_id=device_id,
                         session=session,
                     )
-                    # Validate by refreshing the token
-                    await client.auth.async_refresh_token(session)
-                    new_refresh_token = client.refresh_token
+                    # Validate by attempting login
+                    await client.auth.async_login_with_credentials(session)
 
                     # Try to get user profile for a friendly title
                     try:
@@ -57,7 +58,8 @@ class BuildingLinkConfigFlow(ConfigFlow, domain=DOMAIN):
                 return self.async_create_entry(
                     title=title,
                     data={
-                        CONF_REFRESH_TOKEN: new_refresh_token,
+                        CONF_USERNAME: username,
+                        CONF_PASSWORD: password,
                         CONF_DEVICE_ID: device_id,
                     },
                 )
@@ -66,7 +68,8 @@ class BuildingLinkConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="user",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_REFRESH_TOKEN): str,
+                    vol.Required(CONF_USERNAME): str,
+                    vol.Required(CONF_PASSWORD): str,
                 }
             ),
             errors=errors,

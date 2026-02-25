@@ -41,7 +41,10 @@ class BuildingLinkCoordinator(DataUpdateCoordinator[BuildingLinkData]):
     def __init__(
         self,
         hass: HomeAssistant,
-        refresh_token: str,
+        *,
+        username: str | None = None,
+        password: str | None = None,
+        refresh_token: str | None = None,
         device_id: str | None = None,
     ) -> None:
         """Initialize the coordinator."""
@@ -52,6 +55,8 @@ class BuildingLinkCoordinator(DataUpdateCoordinator[BuildingLinkData]):
             update_interval=timedelta(seconds=DEFAULT_SCAN_INTERVAL),
         )
         self.client = BuildingLinkClient(
+            username=username,
+            password=password,
             refresh_token=refresh_token,
             device_id=device_id,
         )
