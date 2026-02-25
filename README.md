@@ -35,17 +35,9 @@ Copy the `custom_components/buildinglink` folder to your Home Assistant `config/
 
 1. Go to **Settings** → **Devices & Services** → **Add Integration**
 2. Search for **BuildingLink**
-3. Enter your refresh token
+3. Enter your BuildingLink username (email) and password
 
-### Getting a Refresh Token
-
-You'll need to capture the refresh token from the BuildingLink iOS app:
-
-1. Install a network proxy tool (e.g., [Proxyman](https://proxyman.io/))
-2. Configure your iPhone to use the proxy
-3. Open the BuildingLink app and log in
-4. Look for a request to `auth.buildinglink.com/connect/token`
-5. Copy the `refresh_token` from the response
+That's it! No proxy tools or token capture needed.
 
 ## Sensors
 
@@ -57,7 +49,7 @@ You'll need to capture the refresh token from the BuildingLink iOS app:
 | `sensor.buildinglink_calendar_events` | Count of upcoming calendar events |
 | `sensor.buildinglink_amenity_reservations` | Count of upcoming amenity reservations |
 
-Data refreshes every 5 minutes. The refresh token is automatically rotated.
+Data refreshes every 5 minutes. Authentication is handled automatically.
 
 ## License
 

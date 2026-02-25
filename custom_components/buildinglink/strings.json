@@ -3,14 +3,15 @@
     "step": {
       "user": {
         "title": "BuildingLink",
-        "description": "Enter your BuildingLink refresh token. You can obtain this by intercepting the BuildingLink iOS app traffic.",
+        "description": "Enter your BuildingLink login credentials.",
         "data": {
-          "refresh_token": "Refresh Token"
+          "username": "Username (email)",
+          "password": "Password"
         }
       }
     },
     "error": {
-      "invalid_auth": "Invalid refresh token",
+      "invalid_auth": "Invalid username or password",
       "cannot_connect": "Cannot connect to BuildingLink"
     },
     "abort": {
