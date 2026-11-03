@@ -8,6 +8,8 @@ EVENTLOG_HOST = "https://eventlog-us1.buildinglink.com"
 MAINTENANCE_HOST = "https://maintenance-us1.buildinglink.com"
 USERS_HOST = "https://users-us1.buildinglink.com"
 FRONT_DESK_HOST = "https://frontdeskinstructions-us1.buildinglink.com"
+CONTENT_HOST = "https://contentcreatorv2-us1.buildinglink.com"
+CALENDAR_HOST = "https://calendar-us1.buildinglink.com"
 LEGACY_HOST = "https://www.buildinglink.com"
 
 CLIENT_ID = "ios-resident-app"

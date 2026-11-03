@@ -49,7 +49,7 @@ That's it! No proxy tools or token capture needed.
 | `sensor.buildinglink_calendar_events` | Count of upcoming calendar events |
 | `sensor.buildinglink_amenity_reservations` | Count of upcoming amenity reservations |
 
-Data refreshes every 5 minutes. Authentication is handled automatically.
+Data refreshes every 5 minutes. Sign-in uses your BuildingLink username and password via the same OAuth2 (PKCE) flow as the iOS app; tokens are refreshed automatically.
 
 ## License
 

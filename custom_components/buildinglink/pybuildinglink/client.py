@@ -12,6 +12,8 @@ from .auth import BuildingLinkAuth
 from .const import (
     API_HOST,
     API_KEY,
+    CALENDAR_HOST,
+    CONTENT_HOST,
     APIM_SUBSCRIPTION_KEY,
     EVENTLOG_HOST,
     FRONT_DESK_HOST,
@@ -205,7 +207,7 @@ class BuildingLinkClient:
 
     async def async_get_announcements(self) -> list[Announcement]:
         """Get active announcements."""
-        url = f"{API_HOST}/ContentCreator/Resident/v1/announcements/active"
+        url = f"{CONTENT_HOST}/announcements/active"
         result = await self._request("GET", url)
         if isinstance(result, list):
             return [Announcement.model_validate(a) for a in result]
@@ -217,12 +219,12 @@ class BuildingLinkClient:
         to_date: str | None = None,
     ) -> list[CalendarEvent]:
         """Get calendar events with optional date range."""
-        url = f"{API_HOST}/Calendar/Resident/v2/resident/events/filteredeventsrsvp"
+        url = f"{CALENDAR_HOST}/resident/events/filteredeventsrsvp"
         params: dict[str, Any] = {}
         if from_date:
-            params["fromDateTime"] = from_date
+            params["FromDateTime"] = from_date
         if to_date:
-            params["toDateTime"] = to_date
+            params["ToDateTime"] = to_date
         result = await self._request("GET", url, params=params)
         if isinstance(result, list):
             return [CalendarEvent.model_validate(e) for e in result]
