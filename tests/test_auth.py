@@ -88,3 +88,48 @@ async def test_refresh_success_skips_login():
             assert await auth.async_get_access_token(s) == "NEW"
             assert auth.refresh_token == "R2"
         assert not any(k[1].path == "/connect/authorize" for k in m.requests)
+
+
+def _hit(m: aioresponses, url: str) -> bool:
+    return any(str(k[1]).startswith(url) for k in m.requests)
+
+
+async def test_authorize_redirecting_straight_to_callback_skips_login():
+    with aioresponses() as m:
+        m.get(AUTHORIZE, status=302, headers={"Location": CODE_URL})
+        m.post(AUTH_URL, payload=TOKEN)
+        async with aiohttp.ClientSession() as s:
+            auth = BuildingLinkAuth(username="u", password="p")
+            assert await auth.async_login_with_credentials(s) == "AT"
+        assert not any(k[0] == "POST" and k[1].path == "/Account/Login" for k in m.requests)
+
+
+async def test_off_origin_form_action_is_rejected_without_posting_credentials():
+    evil = LOGIN_FORM.replace('action="/Account/Login?ReturnUrl=abc"', 'action="https://evil.example/steal"')
+    with aioresponses() as m:
+        m.get(AUTHORIZE, status=302, headers={"Location": "/Account/Login?ReturnUrl=x"})
+        m.get("https://auth.buildinglink.com/Account/Login?ReturnUrl=x", body=evil)
+        async with aiohttp.ClientSession() as s:
+            auth = BuildingLinkAuth(username="u", password="p")
+            with pytest.raises(AuthenticationError):
+                await auth.async_login_with_credentials(s)
+        assert not _hit(m, "https://evil.example")
+
+
+async def test_off_origin_redirect_mid_flow_is_rejected():
+    with aioresponses() as m:
+        m.get(AUTHORIZE, status=302, headers={"Location": "https://evil.example/hop"})
+        async with aiohttp.ClientSession() as s:
+            auth = BuildingLinkAuth(username="u", password="p")
+            with pytest.raises(AuthenticationError):
+                await auth.async_login_with_credentials(s)
+        assert not _hit(m, "https://evil.example")
+
+
+async def test_http_downgrade_redirect_is_rejected():
+    with aioresponses() as m:
+        m.get(AUTHORIZE, status=302, headers={"Location": "http://auth.buildinglink.com/x"})
+        async with aiohttp.ClientSession() as s:
+            with pytest.raises(AuthenticationError):
+                await BuildingLinkAuth(username="u", password="p").async_login_with_credentials(s)
+        assert not _hit(m, "http://auth.buildinglink.com")

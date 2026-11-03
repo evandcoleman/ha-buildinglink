@@ -54,6 +54,20 @@ MAX_REDIRECT_HOPS = 10
 _REDIRECT_STATUSES = (301, 302, 303, 307, 308)
 
 
+def _ensure_auth_origin(url: str) -> None:
+    """Reject any URL that is not exactly the auth origin (credentials safety)."""
+    parsed = urlparse(url)
+    if f"{parsed.scheme}://{parsed.netloc}" != AUTH_HOST:
+        raise AuthenticationError("Unexpected redirect target during login")
+
+
+def _extract_code(callback_url: str) -> str:
+    code = parse_qs(urlparse(callback_url).query).get("code", [None])[0]
+    if not code:
+        raise AuthenticationError("Callback missing authorization code")
+    return code
+
+
 def _pkce_pair() -> tuple[str, str]:
     """Return (code_verifier, S256 code_challenge)."""
     verifier = secrets.token_urlsafe(48)
@@ -122,57 +136,65 @@ class BuildingLinkAuth:
             }
         )
         try:
-            async with session.get(
-                f"{AUTHORIZE_URL}?{query}", headers=headers, allow_redirects=True
-            ) as resp:
-                login_html = await resp.text()
-                login_url = str(resp.url)
-
-            try:
-                form = _get_hidden_inputs(login_html)
-            except Exception as err:  # unparsable page
-                raise AuthenticationError("Login form not found") from err
-            form["Username"] = self._username
-            form["Password"] = self._password
-            form["RememberLogin"] = "false"
-            action = _get_form_action(login_html, login_url) or login_url
-
-            async with session.post(
-                action, data=form, headers=headers, allow_redirects=False
-            ) as resp:
-                if resp.status not in _REDIRECT_STATUSES:
-                    # The form is re-rendered (HTTP 200) on bad credentials.
-                    raise AuthenticationError("Invalid username or password")
-                location = resp.headers.get("Location", "")
-
-            code = await self._async_follow_to_code(session, location, headers)
+            code = await self._async_authorize(
+                session, f"{AUTHORIZE_URL}?{query}", headers
+            )
             return await self._async_exchange_code(session, code, verifier)
         except AuthenticationError:
             raise
         except aiohttp.ClientError as err:
             raise AuthenticationError(f"Network error during login: {err}") from err
 
-    async def _async_follow_to_code(
+    async def _async_authorize(
         self,
         session: aiohttp.ClientSession,
-        location: str,
+        url: str,
         headers: dict[str, str],
     ) -> str:
-        """Follow redirects manually until the app-scheme callback; return code."""
-        scheme = REDIRECT_URI.split(":", 1)[0] + ":"
+        """Walk the authorize flow with manual redirects; return the auth code.
+
+        Handles an already-authenticated session (redirect straight to the
+        callback) and the login form, and never leaves the auth origin.
+        """
+        submitted = False
+        resp_cm = session.get(url, headers=headers, allow_redirects=False)
         for _ in range(MAX_REDIRECT_HOPS):
-            if not location:
-                raise AuthenticationError("Login flow ended without a redirect")
-            if location.startswith(scheme):
-                code = parse_qs(urlparse(location).query).get("code", [None])[0]
-                if not code:
-                    raise AuthenticationError("Callback missing authorization code")
-                return code
-            async with session.get(
-                urljoin(AUTH_HOST, location), headers=headers, allow_redirects=False
-            ) as resp:
-                location = resp.headers.get("Location", "")
+            async with resp_cm as resp:
+                if resp.status in _REDIRECT_STATUSES:
+                    location = resp.headers.get("Location", "")
+                    if not location:
+                        raise AuthenticationError("Redirect without Location")
+                    if location.startswith(REDIRECT_URI.split(":", 1)[0] + ":"):
+                        return _extract_code(location)
+                    url = urljoin(url, location)
+                    _ensure_auth_origin(url)
+                    resp_cm = session.get(url, headers=headers, allow_redirects=False)
+                    continue
+                if resp.status != 200 or submitted:
+                    # A re-rendered form after POST means bad credentials.
+                    raise AuthenticationError("Invalid username or password")
+                html = await resp.text()
+            form_url, form = self._build_login_post(html, url)
+            submitted = True
+            resp_cm = session.post(
+                form_url, data=form, headers=headers, allow_redirects=False
+            )
+            url = form_url
         raise AuthenticationError("Too many redirects during login")
+
+    def _build_login_post(self, html: str, page_url: str) -> tuple[str, dict[str, str]]:
+        """Return (validated form action URL, form fields) for the login page."""
+        try:
+            form = _get_hidden_inputs(html)
+            action = _get_form_action(html, page_url)
+        except Exception as err:  # unparsable page
+            raise AuthenticationError("Login form not found") from err
+        action_url = urljoin(page_url, action) if action else page_url
+        _ensure_auth_origin(action_url)
+        form["Username"] = self._username or ""
+        form["Password"] = self._password or ""
+        form["RememberLogin"] = "false"
+        return action_url, form
 
     async def _async_token_refresh(self, session: aiohttp.ClientSession) -> str:
         """Refresh access token using refresh_token."""
