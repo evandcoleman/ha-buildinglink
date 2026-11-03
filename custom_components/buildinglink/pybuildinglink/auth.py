@@ -1,15 +1,26 @@
-"""Authentication for BuildingLink via web scraping login flow."""
+"""Authentication for BuildingLink via the iOS app OAuth2 code + PKCE flow."""
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import logging
+import secrets
 import time
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlencode, urljoin, urlparse
 
 import aiohttp
 from lxml import html as lxml_html
 
-from .const import AUTH_URL, CLIENT_ID, LOGIN_URL, OIDC_CALLBACK_URL, USER_AGENT
+from .const import (
+    AUTH_HOST,
+    AUTH_URL,
+    AUTHORIZE_URL,
+    CLIENT_ID,
+    REDIRECT_URI,
+    SCOPE,
+    USER_AGENT,
+)
 from .exceptions import AuthenticationError
 
 _LOGGER = logging.getLogger(__name__)
@@ -39,30 +50,23 @@ def _get_form_action(text: str, base_url: str) -> str | None:
     return action
 
 
-def _extract_auth_redirect_url(content: bytes) -> str:
-    """Extract the auth redirect URL from the login page JavaScript."""
-    # The login page has a script like: window.top.location.href="https://auth..."
-    start = content.find(b"https://auth")
-    if start == -1:
-        raise AuthenticationError("Could not find auth redirect URL in login page")
-    # Find the end of the URL (terminated by "; or ')
-    end = content.find(b'";', start)
-    if end == -1:
-        end = content.find(b"';", start)
-    if end == -1:
-        raise AuthenticationError("Could not parse auth redirect URL")
-    return content[start:end].decode("utf-8")
+MAX_REDIRECT_HOPS = 10
+_REDIRECT_STATUSES = (301, 302, 303, 307, 308)
+
+
+def _pkce_pair() -> tuple[str, str]:
+    """Return (code_verifier, S256 code_challenge)."""
+    verifier = secrets.token_urlsafe(48)
+    digest = hashlib.sha256(verifier.encode()).digest()
+    return verifier, base64.urlsafe_b64encode(digest).rstrip(b"=").decode()
 
 
 class BuildingLinkAuth:
     """Manage authentication for BuildingLink.
 
-    Uses a web scraping login flow matching the approach used by
-    buildinglink-mqtt and the johnagan/buildinglink npm package:
-    1. GET login page → extract auth redirect URL
-    2. GET auth URL → get login form with hidden CSRF fields
-    3. POST form with username + password → get OIDC callback form
-    4. POST OIDC callback → session authenticated, extract token
+    Drives the iOS app's authorization-code + PKCE flow with the user's
+    username/password (scraping the hosted login form), then refreshes with
+    the refresh token and falls back to a full login when refresh fails.
     """
 
     def __init__(
@@ -96,117 +100,79 @@ class BuildingLinkAuth:
     async def async_login_with_credentials(
         self, session: aiohttp.ClientSession
     ) -> str:
-        """Authenticate using username/password via web scraping.
+        """Authenticate with username/password. Returns the access token.
 
-        Follows the same flow as buildinglink-mqtt (proven working).
-        Returns access token. Raises AuthenticationError on failure.
+        Raises AuthenticationError on failure.
         """
         if not self._username or not self._password:
             raise AuthenticationError("Username and password required")
 
         headers = {"User-Agent": USER_AGENT}
-
+        verifier, challenge = _pkce_pair()
+        query = urlencode(
+            {
+                "client_id": CLIENT_ID,
+                "response_type": "code",
+                "redirect_uri": REDIRECT_URI,
+                "scope": SCOPE,
+                "code_challenge": challenge,
+                "code_challenge_method": "S256",
+                "state": secrets.token_hex(8),
+                "nonce": secrets.token_urlsafe(16),
+            }
+        )
         try:
-            # Step 1: GET the login page
-            _LOGGER.debug("Step 1: Loading login page")
             async with session.get(
-                LOGIN_URL, headers=headers, allow_redirects=True
-            ) as resp:
-                content = await resp.read()
-
-            # Step 2: Extract the auth redirect URL from the page's JavaScript
-            auth_url = _extract_auth_redirect_url(content)
-            _LOGGER.debug("Step 2: Following auth redirect")
-
-            # Step 3: GET the auth form
-            async with session.get(
-                auth_url, headers=headers, allow_redirects=True
+                f"{AUTHORIZE_URL}?{query}", headers=headers, allow_redirects=True
             ) as resp:
                 login_html = await resp.text()
-                login_post_url = str(resp.url)
+                login_url = str(resp.url)
 
-            # Check if we got a form
-            form_data = _get_hidden_inputs(login_html)
-            
-            # Get form action if different from current URL
-            form_action = _get_form_action(login_html, login_post_url)
-            if form_action:
-                login_post_url = form_action
-
-            # Step 4: Fill in credentials and POST
-            form_data["Username"] = self._username
-            form_data["Password"] = self._password
-            _LOGGER.debug("Step 3: Submitting login form to %s", login_post_url)
+            try:
+                form = _get_hidden_inputs(login_html)
+            except Exception as err:  # unparsable page
+                raise AuthenticationError("Login form not found") from err
+            form["Username"] = self._username
+            form["Password"] = self._password
+            form["RememberLogin"] = "false"
+            action = _get_form_action(login_html, login_url) or login_url
 
             async with session.post(
-                login_post_url,
-                data=form_data,
-                headers={**headers, "Content-Type": "application/x-www-form-urlencoded"},
-                allow_redirects=False,
+                action, data=form, headers=headers, allow_redirects=False
             ) as resp:
-                resp_text = await resp.text()
-                
-                # Handle redirect after login
-                if resp.status in (301, 302):
-                    redirect_url = resp.headers.get("Location", "")
-                    _LOGGER.debug("Login redirected to: %s", redirect_url[:80])
-                    async with session.get(
-                        redirect_url, headers=headers, allow_redirects=True
-                    ) as redir_resp:
-                        resp_text = await redir_resp.text()
+                if resp.status not in _REDIRECT_STATUSES:
+                    # The form is re-rendered (HTTP 200) on bad credentials.
+                    raise AuthenticationError("Invalid username or password")
+                location = resp.headers.get("Location", "")
 
-            # Check for login errors in the response
-            if "validation-summary-errors" in resp_text:
-                raise AuthenticationError("Invalid username or password")
-
-            # Step 5: Extract callback form and POST to OIDC callback
-            callback_data = _get_hidden_inputs(resp_text)
-            if not callback_data:
-                raise AuthenticationError(
-                    "Login failed: no OIDC callback data. Check credentials."
-                )
-
-            _LOGGER.debug("Step 4: Posting OIDC callback with %d fields", len(callback_data))
-
-            # The callback form data contains the tokens
-            # Save access_token if present in the form
-            token = callback_data.get("access_token")
-
-            async with session.post(
-                OIDC_CALLBACK_URL,
-                data=callback_data,
-                headers={**headers, "Content-Type": "application/x-www-form-urlencoded"},
-                allow_redirects=True,
-            ) as resp:
-                _LOGGER.debug("OIDC callback response: %d", resp.status)
-
-            # If we got a token from the form, use it
-            if token:
-                self._access_token = token
-                self._token_expiry = time.time() + 900
-                _LOGGER.debug("Got access token from OIDC callback form")
-                return token
-
-            # If no direct token, try token endpoint with refresh token from form
-            if "refresh_token" in callback_data:
-                self._refresh_token = callback_data["refresh_token"]
-                result = await self._async_token_refresh(session)
-                return result
-
-            # Last resort: try the code flow
-            if "code" in callback_data:
-                _LOGGER.debug("Got auth code, exchanging for token")
-                return await self._async_exchange_code(session, callback_data["code"])
-
-            raise AuthenticationError("Login flow completed but no token obtained")
-
+            code = await self._async_follow_to_code(session, location, headers)
+            return await self._async_exchange_code(session, code, verifier)
         except AuthenticationError:
             raise
         except aiohttp.ClientError as err:
             raise AuthenticationError(f"Network error during login: {err}") from err
-        except Exception as err:
-            _LOGGER.exception("Unexpected error during login")
-            raise AuthenticationError(f"Login failed: {err}") from err
+
+    async def _async_follow_to_code(
+        self,
+        session: aiohttp.ClientSession,
+        location: str,
+        headers: dict[str, str],
+    ) -> str:
+        """Follow redirects manually until the app-scheme callback; return code."""
+        scheme = REDIRECT_URI.split(":", 1)[0] + ":"
+        for _ in range(MAX_REDIRECT_HOPS):
+            if not location:
+                raise AuthenticationError("Login flow ended without a redirect")
+            if location.startswith(scheme):
+                code = parse_qs(urlparse(location).query).get("code", [None])[0]
+                if not code:
+                    raise AuthenticationError("Callback missing authorization code")
+                return code
+            async with session.get(
+                urljoin(AUTH_HOST, location), headers=headers, allow_redirects=False
+            ) as resp:
+                location = resp.headers.get("Location", "")
+        raise AuthenticationError("Too many redirects during login")
 
     async def _async_token_refresh(self, session: aiohttp.ClientSession) -> str:
         """Refresh access token using refresh_token."""
@@ -233,13 +199,16 @@ class BuildingLinkAuth:
         self._token_expiry = time.time() + result.get("expires_in", 900)
         return self._access_token
 
-    async def _async_exchange_code(self, session: aiohttp.ClientSession, code: str) -> str:
-        """Exchange auth code for access token."""
+    async def _async_exchange_code(
+        self, session: aiohttp.ClientSession, code: str, verifier: str
+    ) -> str:
+        """Exchange auth code (+ PKCE verifier) for tokens."""
         data = {
             "client_id": CLIENT_ID,
             "grant_type": "authorization_code",
             "code": code,
-            "redirect_uri": "com.buildinglink.buildinglink://",
+            "redirect_uri": REDIRECT_URI,
+            "code_verifier": verifier,
         }
         headers = {
             "User-Agent": USER_AGENT,

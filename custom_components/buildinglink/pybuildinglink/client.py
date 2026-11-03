@@ -4,12 +4,15 @@ from __future__ import annotations
 
 import uuid
 from typing import Any
+from urllib.parse import urlparse
 
 import aiohttp
 
 from .auth import BuildingLinkAuth
 from .const import (
     API_HOST,
+    API_KEY,
+    APIM_SUBSCRIPTION_KEY,
     EVENTLOG_HOST,
     FRONT_DESK_HOST,
     LEGACY_HOST,
@@ -33,6 +36,16 @@ from .models import (
     Property,
     UserProfile,
 )
+
+
+def _host_headers(url: str) -> dict[str, str]:
+    """Return the app API key header the given host expects."""
+    host = urlparse(url).hostname or ""
+    if host == "api.buildinglink.com":
+        return {"Ocp-Apim-Subscription-Key": APIM_SUBSCRIPTION_KEY}
+    if host.endswith("-us1.buildinglink.com"):
+        return {"X-API-Key": API_KEY}
+    return {}
 
 
 class BuildingLinkClient:
@@ -108,6 +121,7 @@ class BuildingLinkClient:
             "Accept": "application/json",
             "User-Agent": USER_AGENT,
             "X-Correlation-Id": str(uuid.uuid4()),
+            **_host_headers(url),
         }
 
         if params is None:

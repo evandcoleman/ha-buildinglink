@@ -1,0 +1,6 @@
+pytest
+pytest-asyncio
+aioresponses
+aiohttp<3.14
+lxml
+pydantic
